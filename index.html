@@ -3,15 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>リアルタイム マルバツゲーム (P2P版)</title>
+    <title>リアルタイム マルバツゲーム</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- PeerJS: サーバーなしでブラウザ同士を直接つなぐ魔法のライブラリ -->
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        .cell-x { color: #ef4444; } /* Red */
-        .cell-o { color: #3b82f6; } /* Blue */
+        .cell-x { color: #ef4444; } /* Red for X */
+        .cell-o { color: #3b82f6; } /* Blue for O */
         .glass-panel {
-            background: rgba(255, 255, 255, 0.95);
+            background: rgba(255, 255, 255, 0.9);
             backdrop-filter: blur(10px);
         }
     </style>
@@ -22,32 +20,27 @@
         <h1 class="text-3xl font-bold text-center text-indigo-900 mb-6 tracking-wide">リアルタイム対戦<br>マルバツゲーム</h1>
 
         <!-- Loading / Status -->
-        <div id="status-container" class="text-center mb-4 hidden">
-            <p id="status-text" class="text-lg font-semibold text-gray-600">準備中...</p>
+        <div id="status-container" class="text-center mb-4">
+            <p id="status-text" class="text-lg font-semibold text-gray-600 animate-pulse">初期化中...</p>
         </div>
 
         <!-- Room Entry UI -->
-        <div id="lobby-ui" class="flex flex-col space-y-4 mt-2">
+        <div id="lobby-ui" class="hidden flex flex-col space-y-4 mt-6">
             <div class="bg-blue-50 border border-blue-200 p-4 rounded-xl">
                 <h2 class="font-bold text-blue-800 mb-2">遊び方</h2>
                 <ul class="text-sm text-blue-700 list-disc list-inside space-y-1">
-                    <li>一人が好きな「合言葉」を決めて<b>「部屋を作る」</b>を押します。</li>
-                    <li>もう一人は同じ合言葉を入力して<b>「部屋に入る」</b>を押します。</li>
-                    <li>スマホとPCが直接繋がって対戦が始まります！</li>
+                    <li>適当な「合言葉（ルームID）」を決めて入力します。</li>
+                    <li>対戦相手にも同じ合言葉を入力してもらいます。</li>
+                    <li>同じ部屋に入るとリアルタイム対戦が始まります！</li>
                 </ul>
             </div>
             <div>
-                <label for="room-id" class="block text-sm font-medium text-gray-700 mb-1">合言葉 (半角英数字)</label>
-                <input type="text" id="room-id" placeholder="例: secret123" class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all text-lg font-medium text-center">
+                <label for="room-id" class="block text-sm font-medium text-gray-700 mb-1">合言葉 (ルームID)</label>
+                <input type="text" id="room-id" placeholder="例: secret-room-123" class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all text-lg font-medium text-center">
             </div>
-            <div class="flex space-x-3">
-                <button id="create-btn" class="w-1/2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-all active:scale-95">
-                    部屋を作る
-                </button>
-                <button id="join-btn" class="w-1/2 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-all active:scale-95">
-                    部屋に入る
-                </button>
-            </div>
+            <button id="join-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-all active:scale-95">
+                部屋に入る / 作る
+            </button>
         </div>
 
         <!-- Game UI -->
@@ -55,11 +48,11 @@
             
             <div class="flex justify-between w-full mb-4 px-2 items-end">
                 <div class="flex flex-col">
-                    <span class="text-xs text-gray-500 font-bold uppercase tracking-wider">あなたの記号</span>
+                    <span class="text-xs text-gray-500 font-bold uppercase tracking-wider">Your Symbol</span>
                     <span id="player-symbol" class="text-3xl font-black">-</span>
                 </div>
                 <div class="flex flex-col items-end">
-                    <span class="text-xs text-gray-500 font-bold uppercase tracking-wider">合言葉</span>
+                    <span class="text-xs text-gray-500 font-bold uppercase tracking-wider">Room ID</span>
                     <div class="flex items-center gap-2">
                         <span id="current-room-display" class="font-mono text-sm bg-gray-100 px-2 py-1 rounded">---</span>
                     </div>
@@ -83,23 +76,38 @@
         </div>
     </div>
 
-    <script>
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Environment variables provided by Canvas
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-tictactoe-app';
+        let firebaseConfig = {};
+        try {
+            firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        } catch (e) {
+            console.error("Firebase config parsing error", e);
+        }
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
         // State variables
-        const GAME_PREFIX = 'simple-tictactoe-v1-';
-        let peer = null;
-        let conn = null;
-        let isHost = false;
+        let currentUser = null;
         let currentRoomId = null;
+        let roomUnsubscribe = null;
         let gameState = null;
-        let mySymbol = null; // 'X' (Host) or 'O' (Guest)
+        let mySymbol = null; // 'X' or 'O'
 
         // DOM Elements
-        const statusContainer = document.getElementById('status-container');
         const statusText = document.getElementById('status-text');
         const lobbyUI = document.getElementById('lobby-ui');
         const gameUI = document.getElementById('game-ui');
         const roomIdInput = document.getElementById('room-id');
-        const createBtn = document.getElementById('create-btn');
         const joinBtn = document.getElementById('join-btn');
         const boardEl = document.getElementById('board');
         const playerSymbolEl = document.getElementById('player-symbol');
@@ -120,182 +128,152 @@
         }
         createBoard();
 
-        // UI Helpers
-        function showLobby() {
-            statusContainer.classList.add('hidden');
-            lobbyUI.classList.remove('hidden');
-            gameUI.classList.add('hidden');
+        // 1. Authentication (CRITICAL RULE 3)
+        async function initAuth() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Auth error:", error);
+                setStatus("認証に失敗しました。再読み込みしてください。", true);
+            }
         }
 
-        function showLoading(msg) {
-            lobbyUI.classList.add('hidden');
-            statusContainer.classList.remove('hidden');
-            statusText.textContent = msg;
-            statusText.className = 'text-lg font-semibold text-indigo-600 animate-pulse';
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+                if (!currentRoomId) {
+                    showLobby();
+                }
+            } else {
+                currentUser = null;
+            }
+        });
+
+        initAuth();
+
+        // --- Core Logic ---
+
+        function showLobby() {
+            lobbyUI.classList.remove('hidden');
+            gameUI.classList.add('hidden');
+            setStatus("ルームIDを入力して参加してください。");
         }
 
         function showGame() {
             lobbyUI.classList.add('hidden');
-            statusContainer.classList.remove('hidden');
             gameUI.classList.remove('hidden');
             currentRoomDisplay.textContent = currentRoomId;
         }
 
-        function setStatus(msg, highlight = false) {
+        function setStatus(msg, isError = false) {
             statusText.textContent = msg;
-            statusText.className = highlight 
-                ? 'text-lg font-bold text-indigo-600 animate-pulse' 
-                : 'text-lg font-semibold text-gray-600';
-        }
-
-        function initGameState() {
-            gameState = {
-                board: Array(9).fill(''),
-                turn: 'X',
-                players: { X: true, O: false }, // ホスト(X)は最初からいる
-                winner: null
-            };
-        }
-
-        // --- 部屋を作る（ホスト） ---
-        createBtn.addEventListener('click', () => {
-            let roomId = roomIdInput.value.trim();
-            if (!roomId) {
-                // 空欄ならランダムな6文字を生成
-                roomId = Math.random().toString(36).substring(2, 8);
+            if (isError) {
+                statusText.classList.remove('text-gray-600', 'text-indigo-600', 'animate-pulse');
+                statusText.classList.add('text-red-500');
+            } else {
+                statusText.classList.remove('text-red-500');
+                statusText.classList.add('text-gray-600');
             }
-            
-            showLoading("部屋を作成中...");
-            const peerId = GAME_PREFIX + roomId;
-            
-            peer = new Peer(peerId); // 指定したIDで待受け
+        }
 
-            peer.on('open', (id) => {
-                isHost = true;
-                mySymbol = 'X';
-                currentRoomId = roomId;
-                initGameState();
-                showGame();
-                updateGameState();
-            });
-
-            peer.on('error', (err) => {
-                if (err.type === 'unavailable-id') {
-                    alert("その合言葉はすでに他の人が使っています。別の言葉に変えてください。");
-                } else {
-                    alert("エラーが発生しました: " + err.type);
-                }
-                leaveRoom();
-            });
-
-            peer.on('connection', (connection) => {
-                // ゲストが接続してきた時
-                if (conn) {
-                    // 既に人がいる場合は弾く
-                    connection.send({ type: 'error', message: '部屋は満員です' });
-                    setTimeout(() => connection.close(), 500);
-                    return;
-                }
-                conn = connection;
-                setupConnectionListeners();
-                
-                gameState.players.O = true; // ゲスト参加完了
-                sendStateToGuest();
-                updateGameState();
-            });
-        });
-
-        // --- 部屋に入る（ゲスト） ---
-        joinBtn.addEventListener('click', () => {
+        joinBtn.addEventListener('click', async () => {
             const roomId = roomIdInput.value.trim();
             if (!roomId) {
-                alert("合言葉を入力してください");
+                alert("ルームIDを入力してください。");
                 return;
             }
+            if (!currentUser) return;
 
-            showLoading("部屋を探しています...");
-            peer = new Peer(); // ゲストはランダムなIDでOK
+            joinBtn.disabled = true;
+            joinBtn.textContent = "接続中...";
 
-            peer.on('open', (id) => {
-                const hostPeerId = GAME_PREFIX + roomId;
-                conn = peer.connect(hostPeerId, { reliable: true });
+            try {
+                // Rule 1: Use strict public path for shared game rooms
+                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'tictactoe_rooms', roomId);
+                const snap = await getDoc(roomRef);
 
-                conn.on('open', () => {
-                    // ホストへの接続成功！
-                    isHost = false;
-                    mySymbol = 'O';
-                    currentRoomId = roomId;
-                    setupConnectionListeners();
-                    showGame();
-                });
-
-                // 5秒経っても繋がらない場合はエラー扱いにする
-                setTimeout(() => {
-                    if (!isHost && !gameState) {
-                        alert("部屋が見つかりません。ホストが「部屋を作る」を押しているか、合言葉が正しいか確認してください。");
-                        leaveRoom();
-                    }
-                }, 5000);
-            });
-
-            peer.on('error', (err) => {
-                alert("接続エラー: " + err.type);
-                leaveRoom();
-            });
-        });
-
-        // --- 通信のやり取り ---
-        function setupConnectionListeners() {
-            conn.on('data', (data) => {
-                if (data.type === 'error') {
-                    alert(data.message);
-                    leaveRoom();
-                } else if (data.type === 'state') {
-                    // ホストから最新のゲーム状態を受け取った時（ゲスト用）
-                    gameState = data.state;
-                    updateGameState();
-                } else if (data.type === 'move') {
-                    // ゲストがマスをクリックしたという通知を受け取った時（ホスト用）
-                    if (isHost && gameState.turn === 'O' && gameState.board[data.index] === '') {
-                        gameState.board[data.index] = 'O';
-                        gameState.winner = checkWin(gameState.board);
-                        gameState.turn = 'X';
-                        sendStateToGuest(); // 変更をゲストに送り返す
-                        updateGameState();
-                    }
-                } else if (data.type === 'reset') {
-                    // ゲストがリセットボタンを押した時（ホスト用）
-                    if (isHost) {
-                        initGameState();
-                        gameState.players.O = true; // ゲストは居続ける
-                        sendStateToGuest();
-                        updateGameState();
+                if (!snap.exists()) {
+                    // Room doesn't exist, create it and become 'X'
+                    await setDoc(roomRef, {
+                        board: Array(9).fill(''),
+                        turn: 'X',
+                        players: { X: currentUser.uid, O: null },
+                        winner: null,
+                        lastUpdate: Date.now()
+                    });
+                } else {
+                    // Room exists, try to join
+                    const data = snap.data();
+                    // If O is empty and I am not already X
+                    if (!data.players.O && data.players.X !== currentUser.uid) {
+                        await updateDoc(roomRef, {
+                            'players.O': currentUser.uid,
+                            lastUpdate: Date.now()
+                        });
+                    } else if (data.players.X !== currentUser.uid && data.players.O !== currentUser.uid) {
+                        alert("この部屋はすでに満員です。別のルームIDを試してください。");
+                        joinBtn.disabled = false;
+                        joinBtn.textContent = "部屋に入る / 作る";
+                        return;
                     }
                 }
-            });
 
-            conn.on('close', () => {
-                alert("相手との通信が切断されました。");
-                leaveRoom();
-            });
-        }
+                currentRoomId = roomId;
+                showGame();
+                listenToRoom();
 
-        // ホストからゲストへ状態を送信
-        function sendStateToGuest() {
-            if (isHost && conn && conn.open) {
-                conn.send({ type: 'state', state: gameState });
+            } catch (error) {
+                console.error("Join room error:", error);
+                alert("エラーが発生しました。");
+            } finally {
+                joinBtn.disabled = false;
+                joinBtn.textContent = "部屋に入る / 作る";
             }
+        });
+
+        // Real-time synchronization
+        function listenToRoom() {
+            if (!currentUser || !currentRoomId) return;
+
+            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'tictactoe_rooms', currentRoomId);
+            
+            // Rule 3: Error callback required
+            roomUnsubscribe = onSnapshot(roomRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    gameState = docSnap.data();
+                    updateGameState();
+                } else {
+                    // Room was deleted
+                    leaveRoom();
+                    alert("部屋が解散されました。");
+                }
+            }, (error) => {
+                console.error("Snapshot error:", error);
+                setStatus("通信エラーが発生しました。", true);
+            });
         }
 
-        // --- ゲームの画面更新 ---
         function updateGameState() {
             if (!gameState) return;
 
-            // シンボルの表示
-            playerSymbolEl.textContent = mySymbol === 'X' ? '✖️' : '◯';
-            playerSymbolEl.className = mySymbol === 'X' ? 'text-3xl font-black cell-x' : 'text-3xl font-black cell-o';
+            // Determine my symbol
+            if (gameState.players.X === currentUser.uid) {
+                mySymbol = 'X';
+                playerSymbolEl.textContent = '✖️';
+                playerSymbolEl.className = 'text-3xl font-black cell-x';
+            } else if (gameState.players.O === currentUser.uid) {
+                mySymbol = 'O';
+                playerSymbolEl.textContent = '◯';
+                playerSymbolEl.className = 'text-3xl font-black cell-o';
+            } else {
+                mySymbol = null; // Spectator (shouldn't happen in this basic logic but just in case)
+            }
 
-            // 盤面の描画
+            // Update UI Board
             const cells = boardEl.children;
             for (let i = 0; i < 9; i++) {
                 const val = gameState.board[i];
@@ -311,11 +289,14 @@
                 }
             }
 
-            // メッセージロジック
+            // Status Message Logic
             resetBtn.classList.add('hidden');
+            statusText.classList.remove('animate-pulse');
 
             if (!gameState.players.O) {
-                setStatus("相手の参加を待っています... (合言葉: " + currentRoomId + ")", true);
+                setStatus("相手の参加を待っています... (合言葉を共有してください)", false);
+                statusText.classList.add('animate-pulse');
+                statusText.classList.add('text-indigo-600');
             } else if (gameState.winner) {
                 resetBtn.classList.remove('hidden');
                 if (gameState.winner === 'draw') {
@@ -327,35 +308,40 @@
             } else {
                 const isMyTurn = gameState.turn === mySymbol;
                 if (isMyTurn) {
-                    setStatus("あなたのターンです", true);
+                    setStatus("あなたのターンです", false);
+                    statusText.classList.add('text-indigo-600', 'font-bold');
                 } else {
-                    setStatus("相手のターンです...");
+                    setStatus("相手のターンです...", false);
                 }
             }
         }
 
-        // --- マスをクリックした時 ---
-        function handleCellClick(index) {
-            if (!gameState || !mySymbol) return;
+        async function handleCellClick(index) {
+            if (!currentUser || !gameState || !mySymbol) return;
 
-            // ルールチェック
-            if (gameState.winner) return; // ゲーム終了済み
-            if (gameState.turn !== mySymbol) return; // 自分の番じゃない
-            if (!gameState.players.O) return; // 相手がまだ来てない
-            if (gameState.board[index] !== '') return; // すでに置かれている
+            // Checks before moving
+            if (gameState.winner) return; // Game over
+            if (gameState.turn !== mySymbol) return; // Not my turn
+            if (!gameState.players.O) return; // Waiting for opponent
+            if (gameState.board[index] !== '') return; // Cell already taken
 
-            if (isHost) {
-                // 自分がホストなら、自分で状態を更新して相手に送る
-                gameState.board[index] = mySymbol;
-                gameState.winner = checkWin(gameState.board);
-                gameState.turn = 'O';
-                sendStateToGuest();
-                updateGameState();
-            } else {
-                // 自分がゲストなら、ホストに「ここに置きたい」とリクエストを送る
-                if (conn && conn.open) {
-                    conn.send({ type: 'move', index: index });
-                }
+            // Update local state copy to predict and check win
+            const newBoard = [...gameState.board];
+            newBoard[index] = mySymbol;
+
+            const winner = checkWin(newBoard);
+            const nextTurn = mySymbol === 'X' ? 'O' : 'X';
+
+            try {
+                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'tictactoe_rooms', currentRoomId);
+                await updateDoc(roomRef, {
+                    board: newBoard,
+                    turn: nextTurn,
+                    winner: winner,
+                    lastUpdate: Date.now()
+                });
+            } catch (error) {
+                console.error("Error making move:", error);
             }
         }
 
@@ -375,34 +361,33 @@
             return null;
         }
 
-        // --- リセットと退出 ---
-        resetBtn.addEventListener('click', () => {
-            if (isHost) {
-                initGameState();
-                gameState.players.O = true;
-                sendStateToGuest();
-                updateGameState();
-            } else {
-                // ゲストはホストにリセットを要求する
-                if (conn && conn.open) {
-                    conn.send({ type: 'reset' });
-                }
+        resetBtn.addEventListener('click', async () => {
+            if (!currentUser || !currentRoomId) return;
+            try {
+                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'tictactoe_rooms', currentRoomId);
+                await updateDoc(roomRef, {
+                    board: Array(9).fill(''),
+                    winner: null,
+                    turn: 'X', // X always starts new game
+                    lastUpdate: Date.now()
+                });
+            } catch (error) {
+                console.error("Error resetting game:", error);
             }
         });
 
         function leaveRoom() {
-            if (conn) {
-                conn.close();
-                conn = null;
+            if (roomUnsubscribe) {
+                roomUnsubscribe();
+                roomUnsubscribe = null;
             }
-            if (peer) {
-                peer.destroy();
-                peer = null;
-            }
+            
+            // Note: In a full app, you might want to remove the player's UID from the players object here
+            // using updateDoc. For this simple prototype, we just detach the UI.
+
             currentRoomId = null;
             gameState = null;
             mySymbol = null;
-            isHost = false;
             showLobby();
         }
 
