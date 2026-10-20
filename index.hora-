@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>CH.00 - TV NOISE</title>
+  
+  <!-- iOS Web App Metadata -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="CH.00">
+  <meta name="theme-color" content="#000000">
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Dynamic Icon & Manifest Generation Script -->
+  <script>
+    (function setupPWA() {
+      // Create a creepy dynamic icon (red noise background with stylized eye/cross)
+      const canvas = document.createElement('canvas');
+      canvas.width = 192;
+      canvas.height = 192;
+      const ctx = canvas.getContext('2d');
+
+      // Dark background with noisy frame
+      ctx.fillStyle = '#050505';
+      ctx.fillRect(0, 0, 192, 192);
+
+      // Draw red static noise icon design
+      const imgData = ctx.createImageData(192, 192);
+      for (let i = 0; i < imgData.data.length; i += 4) {
+        const val = Math.random() * 80;
+        const redExtra = Math.random() > 0.85 ? 120 : 0;
+        imgData.data[i] = val + redExtra;     // Red
+        imgData.data[i+1] = val * 0.2;        // Green
+        imgData.data[i+2] = val * 0.2;        // Blue
+        imgData.data[i+3] = 255;              // Alpha
+      }
+      ctx.putImageData(imgData, 0, 0);
+
+      // Icon overlay symbol (Creepy TV Channel "00")
+      ctx.fillStyle = '#ff1111';
+      ctx.font = 'bold 72px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = '#ff0000';
+      ctx.shadowBlur = 15;
+      ctx.fillText('00', 96, 96);
+
+      const iconUrl = canvas.toDataURL('image/png');
+
+      // Inject Apple Touch Icon
+      const appleIcon = document.createElement('link');
+      appleIcon.rel = 'apple-touch-icon';
+      appleIcon.href = iconUrl;
+      document.head.appendChild(appleIcon);
+
+      // Inject Favicon
+      const favicon = document.createElement('link');
+      favicon.rel = 'icon';
+      favicon.href = iconUrl;
+      document.head.appendChild(favicon);
+
+      // Inject Web Manifest
+      const manifest = {
+        name: "チャンネル00",
+        short_name: "CH.00",
+        start_url: ".",
+        display: "standalone",
+        background_color: "#000000",
+        theme_color: "#000000",
+        icons: [{
+          src: iconUrl,
+          sizes: "192x192",
+          type: "image/png",
+          purpose: "any maskable"
+        }]
+      };
+
+      // Safely encode UTF-8 JSON string to Base64 to support non-ASCII Japanese characters
+      const jsonStr = JSON.stringify(manifest);
+      const base64Manifest = btoa(encodeURIComponent(jsonStr).replace(/%([0-9A-F]{2})/g, (match, p1) => String.fromCharCode('0x' + p1)));
+      const manifestStr = 'data:application/manifest+json;base64,' + base64Manifest;
+
+      const manifestLink = document.createElement('link');
+      manifestLink.rel = 'manifest';
+      manifestLink.href = manifestStr;
+      document.head.appendChild(manifestLink);
+    })();
+  </script>
+
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #000;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+      font-family: 'Courier New', Courier, monospace;
+    }
+
+    /* CRT Vignette & Screen Overlay */
+    .crt-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      background: radial-gradient(circle, rgba(0,0,0,0) 50%, rgba(0,0,0,0.85) 90%, rgba(0,0,0,0.98) 100%);
+      box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.9);
+      z-index: 20;
+    }
+
+    /* Scanlines effect */
+    .scanlines {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      background: linear-gradient(
+        to bottom,
+        rgba(255,255,255,0),
+        rgba(255,255,255,0) 50%,
+        rgba(0, 0, 0, 0.4) 50%,
+        rgba(0, 0, 0, 0.4)
+      );
+      background-size: 100% 4px;
+      z-index: 21;
+      opacity: 0.7;
+    }
+
+    /* Red Glitch Bar */
+    .glitch-bar {
+      position: absolute;
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 0, 0, 0.4);
+      pointer-events: none;
+      z-index: 15;
+      display: none;
+    }
+  </style>
+</head>
+<body class="flex flex-col justify-center items-center bg-black text-white">
+
+  <!-- Screen Elements -->
+  <div class="crt-overlay"></div>
+  <div class="scanlines"></div>
+  <div id="glitchBar" class="glitch-bar"></div>
+
+  <!-- Noise Canvas -->
+  <canvas id="noiseCanvas" class="w-full h-full absolute inset-0 z-0 block cursor-pointer"></canvas>
+
+  <!-- Start Overlay (To bypass browser Web Audio autoplay policy) -->
+  <div id="startOverlay" class="absolute inset-0 z-30 flex flex-col justify-center items-center bg-black/90 backdrop-blur-sm p-6 text-center transition-opacity duration-700">
+    <div class="animate-pulse mb-6 text-red-600">
+      <i data-lucide="tv" class="w-16 h-16 mx-auto mb-2"></i>
+    </div>
+    <h1 class="text-2xl font-bold tracking-widest text-red-600 mb-2">CH.00</h1>
+    <p class="text-xs text-gray-400 mb-8 max-w-xs tracking-wider">画面をタップして受信を開始してください</p>
+    
+    <button id="startButton" class="px-8 py-3 bg-red-950 border border-red-600/60 text-red-400 rounded-full text-sm tracking-widest font-bold shadow-[0_0_20px_rgba(255,0,0,0.3)] active:scale-95 transition">
+      受信開始
+    </button>
+
+    <!-- PWA Install Guide Button -->
+    <button id="pwaHelpBtn" class="mt-8 text-xs text-gray-500 underline underline-offset-4 hover:text-gray-300">
+      ホーム画面に追加する方法
+    </button>
+  </div>
+
+  <!-- On-Screen Display (OSD) HUD -->
+  <div id="hud" class="absolute top-6 left-6 z-20 pointer-events-none text-green-500/80 font-mono text-sm tracking-widest drop-shadow-[0_0_5px_rgba(0,255,0,0.7)] hidden select-none">
+    <div class="flex items-center gap-2 mb-1">
+      <span class="w-2.5 h-2.5 rounded-full bg-red-600 animate-ping"></span>
+      <span class="text-red-500 font-bold">● REC</span>
+    </div>
+    <div>CH.00</div>
+    <div id="signalText" class="text-xs text-gray-400 mt-1">SIGNAL: BAD</div>
+  </div>
+
+  <!-- Scary Whisper Text (Randomly appears) -->
+  <div id="whisperText" class="absolute z-20 text-red-600 font-bold text-2xl md:text-4xl tracking-widest pointer-events-none opacity-0 transition-opacity duration-75 select-none text-center px-4">
+    う し ろ
+  </div>
+
+  <!-- Menu / Info Overlay Modal -->
+  <div id="helpModal" class="fixed inset-0 z-40 bg-black/95 text-gray-200 p-6 flex flex-col justify-center items-center hidden backdrop-blur-md">
+    <div class="max-w-md w-full bg-gray-900/80 border border-red-900/40 p-6 rounded-2xl shadow-2xl relative">
+      <button id="closeHelpBtn" class="absolute top-4 right-4 text-gray-400 hover:text-white">
+        <i data-lucide="x" class="w-6 h-6"></i>
+      </button>
+      
+      <h2 class="text-lg font-bold text-red-500 mb-4 flex items-center gap-2">
+        <i data-lucide="smartphone" class="w-5 h-5"></i>
+        ホーム画面への追加手順
+      </h2>
+      
+      <div class="space-y-4 text-xs text-gray-300 leading-relaxed">
+        <div class="p-3 bg-black/50 rounded-lg border border-gray-800">
+          <p class="font-bold text-red-400 mb-1">iPhone / iPad (Safari)</p>
+          <ol class="list-decimal list-inside space-y-1 text-gray-400">
+            <li>画面下部（または上部）の <strong class="text-white">共有ボタン</strong> (四角から矢印がでているアイコン) をタップ</li>
+            <li>メニューから <strong class="text-white">「ホーム画面に追加」</strong> を選択</li>
+            <li>右上キーの「追加」を押すとアイコンが登録されます</li>
+          </ol>
+        </div>
+
+        <div class="p-3 bg-black/50 rounded-lg border border-gray-800">
+          <p class="font-bold text-red-400 mb-1">Android (Chrome)</p>
+          <ol class="list-decimal list-inside space-y-1 text-gray-400">
+            <li>右上の <strong class="text-white">三点リーダー (メニュー)</strong> をタップ</li>
+            <li><strong class="text-white">「アプリをインストール」</strong> または <strong class="text-white">「ホーム画面に追加」</strong> を選択</li>
+          </ol>
+        </div>
+      </div>
+
+      <button id="closeHelpBtnBottom" class="mt-6 w-full py-2.5 bg-red-900/50 hover:bg-red-800 text-red-200 text-xs font-bold rounded-xl transition">
+        閉じる
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // Initialize Lucide Icons
+    lucide.createIcons();
+
+    // Elements
+    const canvas = document.getElementById('noiseCanvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const startOverlay = document.getElementById('startOverlay');
+    const startButton = document.getElementById('startButton');
+    const hud = document.getElementById('hud');
+    const glitchBar = document.getElementById('glitchBar');
+    const whisperText = document.getElementById('whisperText');
+    const pwaHelpBtn = document.getElementById('pwaHelpBtn');
+    const helpModal = document.getElementById('helpModal');
+    const closeHelpBtn = document.getElementById('closeHelpBtn');
+    const closeHelpBtnBottom = document.getElementById('closeHelpBtnBottom');
+
+    // Audio Context Setup
+    let audioCtx = null;
+    let noiseNode = null;
+    let gainNode = null;
+    let filterNode = null;
+    let isPlaying = false;
+
+    // Creepy creepy horror texts
+    const creepyMessages = [
+      "う し ろ",
+      "み て る よ",
+      "逃 げ ら れ な い",
+      "助 け て",
+      "03 : 33",
+      "誰 か い る",
+      "電 波 障 害",
+      "ミ ツ ケ タ",
+      "CLOSE YOUR EYES"
+    ];
+
+    function initAudio() {
+      if (audioCtx) return;
+
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AudioContext();
+
+      // Create White Noise Buffer (2 Seconds loop)
+      const bufferSize = audioCtx.sampleRate * 2;
+      const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+
+      for (let i = 0; i < bufferSize; i++) {
+        // Raw white noise with low frequency fluctuation
+        output[i] = (Math.random() * 2 - 1);
+      }
+
+      noiseNode = audioCtx.createBufferSource();
+      noiseNode.buffer = noiseBuffer;
+      noiseNode.loop = true;
+
+      // Filter for analog radio/TV hum effect
+      filterNode = audioCtx.createBiquadFilter();
+      filterNode.type = 'lowpass';
+      filterNode.frequency.setValueAtTime(1200, audioCtx.currentTime);
+
+      // Volume control
+      gainNode = audioCtx.createGain();
+      gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
+
+      // Connect nodes
+      noiseNode.connect(filterNode);
+      filterNode.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+
+      noiseNode.start();
+    }
+
+    // Dynamic Filter Frequency Modulation (makes noise sound "alive" and eerie)
+    function modulateAudio() {
+      if (!audioCtx || !isPlaying) return;
+      
+      const now = audioCtx.currentTime;
+      // Random subtle frequency sweeps
+      if (Math.random() < 0.2) {
+        const freq = 600 + Math.random() * 2000;
+        filterNode.frequency.setTargetAtTime(freq, now, 0.1);
+      }
+
+      // Random volume stutters
+      if (Math.random() < 0.05) {
+        gainNode.gain.setTargetAtTime(0.02 + Math.random() * 0.2, now, 0.05);
+      }
+    }
+
+    let width, height;
+    let imgData;
+    let frameCount = 0;
+    let scareActive = false;
+
+    function resizeCanvas() {
+      // Lower internal resolution for authentic grainy CRT TV look and performance
+      width = canvas.width = Math.floor(window.innerWidth / 2);
+      height = canvas.height = Math.floor(window.innerHeight / 2);
+      imgData = ctx.createImageData(width, height);
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // Render Snow Noise
+    function renderNoise() {
+      const data = imgData.data;
+      const len = data.length;
+
+      // Determine horror red-tint glitch condition
+      const isRedGlitch = scareActive || Math.random() < 0.008;
+
+      for (let i = 0; i < len; i += 4) {
+        // Random grayscale static value
+        const val = Math.floor(Math.random() * 255);
+
+        if (isRedGlitch && Math.random() < 0.15) {
+          // Creepy red static leak
+          data[i] = 200 + Math.random() * 55;   // R
+          data[i + 1] = val * 0.1;              // G
+          data[i + 2] = val * 0.1;              // B
+        } else {
+          data[i] = val;                       // R
+          data[i + 1] = val;                   // G
+          data[i + 2] = val;                   // B
+        }
+        data[i + 3] = 255;                     // Alpha
+      }
+
+      // Occasionally draw horizontal distortion lines
+      if (Math.random() < 0.3) {
+        const lineY = Math.floor(Math.random() * height);
+        const lineLength = Math.floor(Math.random() * width);
+        const lineStart = (lineY * width) * 4;
+
+        for (let x = 0; x < lineLength * 4; x += 4) {
+          const idx = lineStart + x;
+          if (idx < len) {
+            data[idx] = 255;
+            data[idx + 1] = 255;
+            data[idx + 2] = 255;
+          }
+        }
+      }
+
+      ctx.putImageData(imgData, 0, 0);
+
+      // Draw Creepy Silhouette / Face shadow on rare glitch frame
+      if (scareActive || Math.random() < 0.003) {
+        drawHorrorSilhouette();
+      }
+    }
+
+    // Shadowy figure / Creepy face silhouette
+    function drawHorrorSilhouette() {
+      ctx.save();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+      
+      // Face shape
+      const cx = width / 2 + (Math.random() * 20 - 10);
+      const cy = height / 2 + (Math.random() * 20 - 10);
+
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, 35, 50, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Hollow Red Eyes
+      ctx.fillStyle = '#ff0000';
+      ctx.beginPath();
+      ctx.arc(cx - 12, cy - 10, 4, 0, Math.PI * 2);
+      ctx.arc(cx + 12, cy - 10, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // Trigger momentary Scare / Jump scare glitch
+    function triggerScare() {
+      scareActive = true;
+
+      // Audio glitch intensity
+      if (gainNode && audioCtx) {
+        gainNode.gain.setValueAtTime(0.4, audioCtx.currentTime);
+        filterNode.frequency.setValueAtTime(3500, audioCtx.currentTime);
+      }
+
+      // Show random horror whisper
+      const msg = creepyMessages[Math.floor(Math.random() * creepyMessages.length)];
+      whisperText.textContent = msg;
+      whisperText.style.opacity = '0.9';
+      whisperText.style.transform = `scale(${1 + Math.random() * 0.3}) rotate(${Math.random() * 10 - 5}deg)`;
+
+      // Glitch bar flicker
+      glitchBar.style.display = 'block';
+      glitchBar.style.top = Math.random() * 100 + 'vh';
+
+      setTimeout(() => {
+        scareActive = false;
+        whisperText.style.opacity = '0';
+        glitchBar.style.display = 'none';
+
+        if (gainNode && audioCtx) {
+          gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
+          filterNode.frequency.setValueAtTime(1200, audioCtx.currentTime);
+        }
+      }, 150 + Math.random() * 300);
+    }
+
+    // Main Loop
+    function loop() {
+      frameCount++;
+      
+      renderNoise();
+      modulateAudio();
+
+      // Random spontaneous scares every now and then
+      if (isPlaying && Math.random() < 0.0015) {
+        triggerScare();
+      }
+
+      requestAnimationFrame(loop);
+    }
+
+    // User Start Interaction
+    function startApp() {
+      initAudio();
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+
+      isPlaying = true;
+
+      // Hide start screen
+      startOverlay.classList.add('opacity-0', 'pointer-events-none');
+      setTimeout(() => {
+        startOverlay.classList.add('hidden');
+      }, 700);
+
+      // Show HUD
+      hud.classList.remove('hidden');
+
+      // Request fullscreen if on supported mobile browser
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    }
+
+    startButton.addEventListener('click', startApp);
+
+    // Tap Canvas to interfere / trigger glitch
+    canvas.addEventListener('pointerdown', (e) => {
+      if (!isPlaying) return;
+      triggerScare();
+    });
+
+    // Modal Control
+    pwaHelpBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      helpModal.classList.remove('hidden');
+    });
+
+    closeHelpBtn.addEventListener('click', () => {
+      helpModal.classList.add('hidden');
+    });
+
+    closeHelpBtnBottom.addEventListener('click', () => {
+      helpModal.classList.add('hidden');
+    });
+
+    // Kick off animation loop
+    loop();
+  </script>
+</body>
+</html>
